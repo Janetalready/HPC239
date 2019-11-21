@@ -15,16 +15,35 @@ class Point
 private:
 	int id_point, id_cluster;
 	vector<double> values;
-	int total_values;
+	int dimension;
 	string name;
 
 public:
+	static double l2_distance(Point& a, Point& b) {
+		int dimension = a.dimension;
+		double sum = 0.0;
+
+		for(int i = 0; i < dimension; i++)
+		{
+			sum += pow(a.getValue(i) - b.getValue(i), 2.0);
+		}
+
+		return sum;
+	}
+
+	static double gaussian_kernel_distance(Point& a, Point& b) {
+		double squared_sum = l2_distance(a, b);
+		double sigma = 1.0;
+
+		return exp(- squared_sum / (2 * sigma));
+	}
+
 	Point(int id_point, vector<double>& values, string name = "")
 	{
 		this->id_point = id_point;
-		total_values = values.size();
+		dimension = values.size();
 
-		for(int i = 0; i < total_values; i++)
+		for(int i = 0; i < dimension; i++)
 			this->values.push_back(values[i]);
 
 		this->name = name;
@@ -53,7 +72,7 @@ public:
 
 	int getTotalValues()
 	{
-		return total_values;
+		return dimension;
 	}
 
 	void addValue(double value)
@@ -71,18 +90,34 @@ class Cluster
 {
 private:
 	int id_cluster;
-	vector<double> central_values;
 	vector<Point> points;
 
 public:
+	static double distance_btw_cluster_and_point(Cluster& cluster, Point& point) {
+		vector<Point>& cluster_points = cluster.getPoints();
+		int cluster_size = cluster_points.size();
+
+		double result = 0.0;
+
+		for (Point xk : cluster_points) {
+			result -= 2 * Point::gaussian_kernel_distance(point, xk) / cluster_size;
+		}
+
+		for (Point xk : cluster_points) {
+			for (Point xl : cluster_points) {
+				result += Point::gaussian_kernel_distance(xl, xk) / pow(cluster_size, 2.0);
+			}
+		}
+
+		// Point cluster_center(-1, cluster.getCentralValues());
+		return result;
+	}
+	
 	Cluster(int id_cluster, Point point)
 	{
 		this->id_cluster = id_cluster;
 
-		int total_values = point.getTotalValues();
-
-		for(int i = 0; i < total_values; i++)
-			central_values.push_back(point.getValue(i));
+		int dimension = point.getTotalValues();
 
 		points.push_back(point);
 	}
@@ -107,19 +142,14 @@ public:
 		return false;
 	}
 
-	double getCentralValue(int index)
-	{
-		return central_values[index];
-	}
-
-	void setCentralValue(int index, double value)
-	{
-		central_values[index] = value;
-	}
-
 	Point getPoint(int index)
 	{
 		return points[index];
+	}
+
+	vector<Point>& getPoints()
+	{
+		return points;
 	}
 
 	int getTotalPoints()
@@ -133,39 +163,34 @@ public:
 	}
 };
 
+std::ostream& operator<<(std::ostream& os, const std::vector<int> &input)
+	{
+		for (auto const& i: input) {
+			os << i << " ";
+		}
+		return os;
+	}
+
 class KMeans
 {
 private:
 	int K; // number of clusters
-	int total_values, total_points, max_iterations;
+	int dimension, total_points, max_iterations;
 	vector<Cluster> clusters;
 
 	// return ID of nearest center (uses euclidean distance)
 	int getIDNearestCenter(Point point)
 	{
-		double sum = 0.0, min_dist;
+		double min_dist;
 		int id_cluster_center = 0;
 
-		for(int i = 0; i < total_values; i++)
-		{
-			sum += pow(clusters[0].getCentralValue(i) -
-					   point.getValue(i), 2.0);
-		}
+		double dist = Cluster::distance_btw_cluster_and_point(clusters[0], point);
 
-		min_dist = sqrt(sum);
+		min_dist = dist;
 
 		for(int i = 1; i < K; i++)
 		{
-			double dist;
-			sum = 0.0;
-
-			for(int j = 0; j < total_values; j++)
-			{
-				sum += pow(clusters[i].getCentralValue(j) -
-						   point.getValue(j), 2.0);
-			}
-
-			dist = sqrt(sum);
+			dist = Cluster::distance_btw_cluster_and_point(clusters[i], point);
 
 			if(dist < min_dist)
 			{
@@ -178,16 +203,18 @@ private:
 	}
 
 public:
-	KMeans(int K, int total_points, int total_values, int max_iterations)
+	KMeans(int K, int total_points, int dimension, int max_iterations)
 	{
 		this->K = K;
 		this->total_points = total_points;
-		this->total_values = total_values;
+		this->dimension = dimension;
 		this->max_iterations = max_iterations;
 	}
 
 	void run(vector<Point> & points)
 	{
+		cout << "start\n";
+
 		if(K > total_points)
 			return;
 
@@ -214,6 +241,14 @@ public:
 
 		int iter = 1;
 
+		vector<int> id_new_clusters;
+		vector<int> id_old_clusters;
+
+		for (int i = 0; i < total_points; i++) {
+			id_new_clusters.push_back(-1);
+			id_old_clusters.push_back(-1);
+		} 
+
 		while(true)
 		{
 			bool done = true;
@@ -221,36 +256,26 @@ public:
 			// associates each point to the nearest center
 			for(int i = 0; i < total_points; i++)
 			{
-				int id_old_cluster = points[i].getCluster();
-				int id_nearest_center = getIDNearestCenter(points[i]);
+				id_old_clusters[i] = points[i].getCluster();
+				id_new_clusters[i] = getIDNearestCenter(points[i]);
+			}
 
-				if(id_old_cluster != id_nearest_center)
+			for (int i = 0; i < total_points; i++) {
+				int id_old_cluster = id_old_clusters[i];
+				int id_new_center = id_new_clusters[i];
+
+				if(id_old_cluster != id_new_center)
 				{
-					if(id_old_cluster != -1)
+					if(id_old_cluster != -1) {
 						clusters[id_old_cluster].removePoint(points[i].getID());
-
-					points[i].setCluster(id_nearest_center);
-					clusters[id_nearest_center].addPoint(points[i]);
+					}
+						
+					points[i].setCluster(id_new_center);
+					clusters[id_new_center].addPoint(points[i]);
 					done = false;
 				}
 			}
-
-			// recalculating the center of each cluster
-			for(int i = 0; i < K; i++)
-			{
-				for(int j = 0; j < total_values; j++)
-				{
-					int total_points_cluster = clusters[i].getTotalPoints();
-					double sum = 0.0;
-
-					if(total_points_cluster > 0)
-					{
-						for(int p = 0; p < total_points_cluster; p++)
-							sum += clusters[i].getPoint(p).getValue(j);
-						clusters[i].setCentralValue(j, sum / total_points_cluster);
-					}
-				}
-			}
+			
 
 			if(done == true || iter >= max_iterations)
 			{
@@ -270,7 +295,7 @@ public:
 			for(int j = 0; j < total_points_cluster; j++)
 			{
 				cout << "Point " << clusters[i].getPoint(j).getID() + 1 << ": ";
-				for(int p = 0; p < total_values; p++)
+				for(int p = 0; p < dimension; p++)
 					cout << clusters[i].getPoint(j).getValue(p) << " ";
 
 				string point_name = clusters[i].getPoint(j).getName();
@@ -281,11 +306,6 @@ public:
 				cout << endl;
 			}
 
-			cout << "Cluster values: ";
-
-			for(int j = 0; j < total_values; j++)
-				cout << clusters[i].getCentralValue(j) << " ";
-
 			cout << "\n\n";
 		}
 	}
@@ -295,9 +315,9 @@ int main(int argc, char *argv[])
 {
 	srand (time(NULL));
 
-	int total_points, total_values, K, max_iterations, has_name;
+	int total_points, dimension, K, max_iterations, has_name;
 
-	cin >> total_points >> total_values >> K >> max_iterations >> has_name;
+	cin >> total_points >> dimension >> K >> max_iterations >> has_name;
 
 	vector<Point> points;
 	string point_name;
@@ -306,7 +326,7 @@ int main(int argc, char *argv[])
 	{
 		vector<double> values;
 
-		for(int j = 0; j < total_values; j++)
+		for(int j = 0; j < dimension; j++)
 		{
 			double value;
 			cin >> value;
@@ -326,7 +346,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	KMeans kmeans(K, total_points, total_values, max_iterations);
+	KMeans kmeans(K, total_points, dimension, max_iterations);
 	kmeans.run(points);
 
 	return 0;
