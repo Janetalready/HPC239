@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <time.h>
 #include <algorithm>
+#include <fstream>
+#include <sstream>
 
 using namespace std;
 
@@ -315,38 +317,34 @@ int main(int argc, char *argv[])
 {
 	srand (time(NULL));
 
-	int total_points, dimension, K, max_iterations, has_name;
-
-	cin >> total_points >> dimension >> K >> max_iterations >> has_name;
+	int max_iterations = 10, K = 5; //To change
 
 	vector<Point> points;
-	string point_name;
-
-	for(int i = 0; i < total_points; i++)
-	{
-		vector<double> values;
-
-		for(int j = 0; j < dimension; j++)
-		{
-			double value;
-			cin >> value;
-			values.push_back(value);
-		}
-
-		if(has_name)
-		{
-			cin >> point_name;
-			Point p(i, values, point_name);
+	ifstream file;
+	file.open("doc2vec_reviews.txt"); 
+	int id = 0;
+	if(file.is_open()) {
+		string line;
+		while(getline(file, line)) {
+			vector<double> values;
+    		stringstream s_stream(line); 
+    		string value;
+		    while(getline(s_stream, value, ',')) {
+		       values.push_back(stod(value)); 
+		    }
+			Point p(id++, values);
 			points.push_back(p);
 		}
-		else
-		{
-			Point p(i, values);
-			points.push_back(p);
-		}
+		file.close();
 	}
 
-	KMeans kmeans(K, total_points, dimension, max_iterations);
+	int total_points = points.size(); //10000
+	int dimension = points[0].getTotalValues(); //300
+
+
+	vector<Point> test_points = std::vector<Point>(points.begin(), points.begin() + 30);
+	int test_total_points = test_points.size();
+	KMeans kmeans(K, test_total_points, dimension, max_iterations);
 	kmeans.run(points);
 
 	return 0;
