@@ -311,6 +311,15 @@ public:
 			cout << "\n\n";
 		}
 	}
+
+	void showClusterResults(vector<int> labels) {
+		for(int i=0; i<clusters.size(); i++) {
+			cout << "Cluster " << i+1 << ": ";
+			for(Point point : clusters[i].getPoints()) 
+				cout << labels[point.getID()] << " ";
+			cout << "\n";
+		}
+	}
 };
 
 int main(int argc, char *argv[])
@@ -346,6 +355,19 @@ int main(int argc, char *argv[])
 	int test_total_points = test_points.size();
 	KMeans kmeans(K, test_total_points, dimension, max_iterations);
 	kmeans.run(points);
+
+	vector<int> labels;
+	file.open("doc2vec_labels.txt"); 
+	if(file.is_open()) {
+		string line;
+		while(getline(file, line)) {
+			int label = stoi(line);
+			labels.push_back(label);
+		}
+		file.close();
+	}
+
+	kmeans.showClusterResults(labels);
 
 	return 0;
 }
