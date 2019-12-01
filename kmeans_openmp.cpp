@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <omp.h>
 #include <chrono>
 
 using namespace std;
@@ -27,6 +28,7 @@ public:
 		int dimension = a.dimension;
 		double sum = 0.0;
 
+		#pragma omp parallel for reduction(+:sum)
 		for(int i = 0; i < dimension; i++)
 		{
 			sum += pow(a.getValue(i) - b.getValue(i), 2.0);
@@ -47,6 +49,7 @@ public:
 		this->id_point = id_point;
 		dimension = values.size();
 
+		#pragma omp parallel for
 		for(int i = 0; i < dimension; i++)
 			this->values.push_back(values[i]);
 
@@ -103,17 +106,18 @@ public:
 
 		double result = 0.0;
 
+		#pragma omp parallel for reduction(-:result)
 		for (Point xk : cluster_points) {
 			result -= 2 * Point::gaussian_kernel_distance(point, xk) / cluster_size;
 		}
 
+		#pragma omp parallel for collapse(2) reduction(+:result)
 		for (Point xk : cluster_points) {
 			for (Point xl : cluster_points) {
 				result += Point::gaussian_kernel_distance(xl, xk) / pow(cluster_size, 2.0);
 			}
 		}
 
-		// Point cluster_center(-1, cluster.getCentralValues());
 		return result;
 	}
 	
@@ -135,8 +139,10 @@ public:
 	{
 		int total_points = points.size();
 
+		#pragma omp parallel for 
 		for(int i = 0; i < total_points; i++)
-		{
+		{	
+			#pragma omp critical
 			if(points[i].getID() == id_point)
 			{
 				points.erase(points.begin() + i);
@@ -192,10 +198,11 @@ private:
 
 		min_dist = dist;
 
+		#pragma omp parallel for private(dist)
 		for(int i = 1; i < K; i++)
 		{
 			dist = Cluster::distance_btw_cluster_and_point(clusters[i], point);
-
+			#pragma omp critical
 			if(dist < min_dist)
 			{
 				min_dist = dist;
@@ -225,12 +232,14 @@ public:
 		vector<int> prohibited_indexes;
 
 		// choose K distinct values for the centers of the clusters
+		#pragma omp parallel for
 		for(int i = 0; i < K; i++)
 		{
 			while(true)
 			{
 				int index_point = rand() % total_points;
 
+				#pragma omp critical
 				if(find(prohibited_indexes.begin(), prohibited_indexes.end(),
 						index_point) == prohibited_indexes.end())
 				{
@@ -248,6 +257,7 @@ public:
 		vector<int> id_new_clusters;
 		vector<int> id_old_clusters;
 
+		#pragma omp parallel for
 		for (int i = 0; i < total_points; i++) {
 			id_new_clusters.push_back(-1);
 			id_old_clusters.push_back(-1);
@@ -258,12 +268,14 @@ public:
 			bool done = true;
 
 			// associates each point to the nearest center
+			#pragma omp parallel for
 			for(int i = 0; i < total_points; i++)
 			{
 				id_old_clusters[i] = points[i].getCluster();
 				id_new_clusters[i] = getIDNearestCenter(points[i]);
 			}
 
+			#pragma omp parallel for
 			for (int i = 0; i < total_points; i++) {
 				int id_old_cluster = id_old_clusters[i];
 				int id_new_center = id_new_clusters[i];
