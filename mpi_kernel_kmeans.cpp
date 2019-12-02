@@ -404,7 +404,7 @@ int main(int argc, char** argv) {
   KMeans kmeans(K, test_total_points, dimension, max_iterations);
 
     // number of sites per processor.
-  int sites_per_proc = 60;
+  int sites_per_proc = 50;
   srand (time(NULL));
 
   // Initial MPI and find process rank and number of processes.
@@ -472,16 +472,20 @@ int main(int argc, char** argv) {
 
   int iter = 1;
   
-  bool done = true;
-  while (true) { // While they've moved...
-
-
+  int done = 1;
+  int flag = 1;
+  // MPI_Bcast(&flag, 1, MPI_INT, 0, MPI_COMM_WORLD );
+  time_t start, finish;
+  time(&start);
+  while (flag) { // While they've moved...
     // Broadcast the current cluster centroids to all processes.
-
     MPI_Bcast(&clustered_points_size, 1, MPI_INT, 0, MPI_COMM_WORLD );
+    // cout << "iter:" << iter << " " << rank << endl;
+    
     if(rank > 0){
       cluster_concate.resize(clustered_points_size);
     }
+    cout << "iter:" << iter << " " << rank << " " << cluster_concate.size() << endl;
     MPI_Bcast(&cluster_concate[0], cluster_concate.size(), MPI_INT, 0, MPI_COMM_WORLD );
     if(rank > 0){
       cluster_size.resize(5);
@@ -491,43 +495,44 @@ int main(int argc, char** argv) {
     // Find the closest centroid to each site and assign to cluster.
     
 
-    if(rank > 0){
-      int count = 0;
-      for(int i = sites_per_proc * (rank - 1); i < sites_per_proc * rank; i++)
-			{
-        double min_dist;
-        int id_cluster_center = 0;
-        Point point = test_points[i];
 
-        vector<int> cluster_concate_1 = std::vector<int>(cluster_concate.begin(), cluster_concate.begin() + cluster_size[0]);
-        int pointer = cluster_size[0];
-        double dist = Cluster::distance_btw_cluster_and_point_only_index(cluster_concate_1, point, test_points);
+    int count = 0;
+    for(int i = sites_per_proc * rank; i < sites_per_proc * (rank + 1); i++)
+    {
+      double min_dist;
+      int id_cluster_center = 0;
+      Point point = test_points[i];
 
-        min_dist = dist;
-        vector<int> cluster_concate_temp;
+      vector<int> cluster_concate_1 = std::vector<int>(cluster_concate.begin(), cluster_concate.begin() + cluster_size[0]);
+      int pointer = cluster_size[0];
+      double dist = Cluster::distance_btw_cluster_and_point_only_index(cluster_concate_1, point, test_points);
 
-        for(int j = 1; j < K; j++)
+      min_dist = dist;
+      vector<int> cluster_concate_temp;
+
+      for(int j = 1; j < K; j++)
+      {
+        cluster_concate_temp = std::vector<int>(cluster_concate.begin() + pointer, cluster_concate.begin() + pointer + cluster_size[j]);
+        pointer = pointer + cluster_size[j];
+        dist = Cluster::distance_btw_cluster_and_point_only_index(cluster_concate_temp, point, test_points);
+
+        if(dist < min_dist)
         {
-          cluster_concate_temp = std::vector<int>(cluster_concate.begin() + pointer, cluster_concate.begin() + pointer + cluster_size[j]);
-          pointer = pointer + cluster_size[j];
-          dist = Cluster::distance_btw_cluster_and_point_only_index(cluster_concate_temp, point, test_points);
-
-          if(dist < min_dist)
-          {
-            min_dist = dist;
-            id_cluster_center = j;
-          }
+          min_dist = dist;
+          id_cluster_center = j;
         }
-				id_new_clusters_per_pro[count] = id_cluster_center;
-        count++;
-			}
+      }
+      id_new_clusters_per_pro[count] = id_cluster_center;
+      count++;
     }
+
     
     MPI_Gather(&id_new_clusters_per_pro[0], sites_per_proc, MPI_INT,
 	     &id_new_clusters[0], sites_per_proc, MPI_INT, 0, MPI_COMM_WORLD);
     
 
     if (rank == 0) {
+      int count_temp = 0;
       for (int i = 0; i < test_total_points; i++) {
 				int id_old_cluster = id_old_clusters[i];
 				int id_new_center = id_new_clusters[i];
@@ -536,52 +541,59 @@ int main(int argc, char** argv) {
 				{
           if(id_old_cluster == -1){
             total_cluster[id_new_center].push_back(i);
-            cout << cluster_size[id_new_center] << endl;
-            cluster_size[id_new_center] = cluster_size[id_new_center] + 1;
           }
-          // else{
-          //   total_cluster[id_new_center].push_back(i);
-          //   total_cluster[id_old_cluster].erase(remove(total_cluster[id_old_cluster].begin(), total_cluster[id_old_cluster].end(), i), total_cluster[id_old_cluster].end());
-          //   cluster_size[id_new_center] = cluster_size[id_new_center] + 1;
-          //   cluster_size[id_old_cluster] = cluster_size[id_old_cluster] - 1;
-          // }
+          else{
+            total_cluster[id_new_center].push_back(i);
+            total_cluster[id_old_cluster].erase(remove(total_cluster[id_old_cluster].begin(), total_cluster[id_old_cluster].end(), i), total_cluster[id_old_cluster].end());
+          }
 					
-					done = false;
+					done = 0;
 				}
-			}
-      // clustered_points_size = accumulate(cluster_size.begin(), cluster_size.end(), 0);
-      // cluster_concate.reserve(clustered_points_size);
-      // for(int i = 0; i < K; i++){
-      //   cluster_concate.insert(cluster_concate.end(), total_cluster[i].begin(), total_cluster[i].end());
-      // }
-      
+      }
+      id_old_clusters = id_new_clusters;
+      cluster_size.clear();
+      for(int i = 0; i < K; i++){
+        cluster_size.push_back(int(total_cluster[i].size()));
+      }
+
+      clustered_points_size = accumulate(cluster_size.begin(), cluster_size.end(), 0);
+      cluster_concate.clear();
+      cluster_concate.reserve(clustered_points_size);
+      for(int i = 0; i < K; i++){
+        cluster_concate.insert(cluster_concate.end(), total_cluster[i].begin(), total_cluster[i].end());
+      }
     }
-  //   // Broadcast the norm.  All processes will use this in the loop test.
-  //   MPI_Bcast(&done, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
 
-  //   if(done == true || iter >= max_iterations)
-  //   {
-  //     cout << "Break in iteration " << iter << "\n\n";
-  //     break;
-  //   }
+    if(done || iter >= max_iterations)
+    {
+      flag = 0;
+    }
 
-	// 	iter++;
-  // }
-
-  // if(rank == 0){
-  //   vector<int> labels;
-  //   file.open("doc2vec_labels.txt"); 
-  //   if(file.is_open()) {
-  //     string line;
-  //     while(getline(file, line)) {
-  //       int label = stoi(line);
-  //       labels.push_back(label);
-  //     }
-  //     file.close();
-  //   }
-  //   kmeans.showClusterResults(labels);
+		iter++;
+    MPI_Bcast(&flag, 1, MPI_INT, 0, MPI_COMM_WORLD );
+    // cout << "iter:" << iter << " " << rank << endl;
   }
-      
+  time(&finish);
+	cout << "Time required = " << difftime(finish, start) << " seconds";
+  if(rank == 0){
+    vector<int> labels;
+    file.open("doc2vec_labels.txt"); 
+    if(file.is_open()) {
+      string line;
+      while(getline(file, line)) {
+        int label = stoi(line);
+        labels.push_back(label);
+      }
+      file.close();
+    }
+    for(int i = 0; i < K; i++){
+      cout << "cluster " << i << ":" << total_cluster[i].size() << endl;
+      for(int j = 0; j < total_cluster[i].size(); j++){
+        int ind = total_cluster[i][j];
+        cout << labels[ind] << " ";
+      }
+      cout << endl;
+    }
+  }
   MPI_Finalize();
-
 }
