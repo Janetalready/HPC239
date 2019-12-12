@@ -375,7 +375,7 @@ public:
 
 int main(int argc, char** argv) {
 
-	int max_iterations = 10, K = 5; //To change
+	int max_iterations = 50, K = 5; //To change
 
 	vector<Point> points;
 	ifstream file;
@@ -404,8 +404,9 @@ int main(int argc, char** argv) {
   KMeans kmeans(K, test_total_points, dimension, max_iterations);
 
     // number of sites per processor.
-  int sites_per_proc = 50;
-  srand (time(NULL));
+  int number_of_cores = 6;
+  int sites_per_proc = test_total_points/number_of_cores;
+  srand (12345);
 
   // Initial MPI and find process rank and number of processes.
   MPI_Init(NULL, NULL);
@@ -512,6 +513,7 @@ int main(int argc, char** argv) {
 
       for(int j = 1; j < K; j++)
       {
+        cluster_concate_temp.clear();
         cluster_concate_temp = std::vector<int>(cluster_concate.begin() + pointer, cluster_concate.begin() + pointer + cluster_size[j]);
         pointer = pointer + cluster_size[j];
         dist = Cluster::distance_btw_cluster_and_point_only_index(cluster_concate_temp, point, test_points);
@@ -526,19 +528,22 @@ int main(int argc, char** argv) {
       count++;
     }
 
-    
+    if(rank == 0){
+      id_new_clusters.resize(test_total_points);
+    }
     MPI_Gather(&id_new_clusters_per_pro[0], sites_per_proc, MPI_INT,
 	     &id_new_clusters[0], sites_per_proc, MPI_INT, 0, MPI_COMM_WORLD);
     
 
     if (rank == 0) {
-      int count_temp = 0;
+      int count_move = 0;
       for (int i = 0; i < test_total_points; i++) {
 				int id_old_cluster = id_old_clusters[i];
 				int id_new_center = id_new_clusters[i];
 
 				if(id_old_cluster != id_new_center)
 				{
+          count_move++;
           if(id_old_cluster == -1){
             total_cluster[id_new_center].push_back(i);
           }
@@ -551,6 +556,7 @@ int main(int argc, char** argv) {
 				}
       }
       id_old_clusters = id_new_clusters;
+      id_new_clusters.clear();
       cluster_size.clear();
       for(int i = 0; i < K; i++){
         cluster_size.push_back(int(total_cluster[i].size()));
@@ -562,11 +568,12 @@ int main(int argc, char** argv) {
       for(int i = 0; i < K; i++){
         cluster_concate.insert(cluster_concate.end(), total_cluster[i].begin(), total_cluster[i].end());
       }
-    }
 
-    if(done || iter >= max_iterations)
-    {
-      flag = 0;
+      float ratio = float(count_move)/clustered_points_size;
+      if(done || iter >= max_iterations || ratio < 0.01)
+      {
+        flag = 0;
+      }
     }
 
 		iter++;
@@ -574,7 +581,7 @@ int main(int argc, char** argv) {
     // cout << "iter:" << iter << " " << rank << endl;
   }
   time(&finish);
-	cout << "Time required = " << difftime(finish, start) << " seconds";
+	cout << "Time required = " << difftime(finish, start)/float(iter) << " seconds";
   if(rank == 0){
     vector<int> labels;
     file.open("doc2vec_labels.txt"); 
